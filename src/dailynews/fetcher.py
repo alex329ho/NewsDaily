@@ -21,7 +21,7 @@ def _normalize(article: dict) -> dict:
             or ""
         ),
     }
-
+    """
     Returns a list of dictionaries with at least ``title``, ``url`` and ``desc``
     keys. In case of network errors or unexpected responses an empty list is
     returned and a warning is logged.

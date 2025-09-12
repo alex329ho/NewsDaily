@@ -6,9 +6,9 @@ from typing import List
 
 import click
 
-from .fetcher import fetch_news
-from .logging_conf import configure_logging
-from .summarizer import summarize_articles
+from fetcher import fetch_news
+from logging_conf import configure_logging
+from summarizer import summarize_articles
 
 
 @click.command()
