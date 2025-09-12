@@ -21,7 +21,11 @@ def _normalize(article: dict) -> dict:
             or ""
         ),
     }
-    """
+
+
+def fetch_news(topics: list[str], hours: int, maxrecords: int = 75) -> list[dict]:
+    """Fetch articles about ``topics`` in the last ``hours`` hours.
+
     Returns a list of dictionaries with at least ``title``, ``url`` and ``desc``
     keys. In case of network errors or unexpected responses an empty list is
     returned and a warning is logged.
