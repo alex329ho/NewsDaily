@@ -2,29 +2,49 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-summarizer = None
+_summarizer = None
 _MAX_CHARS = 1000
 
 
-def _get_summarizer():
-    """Load the summarization pipeline on first use."""
-    global summarizer
-    if summarizer is None:
-        try:
-            from transformers import pipeline  # type: ignore
+def get_summarizer():
+    """Return a cached summarizer pipeline or a stub.
 
-            summarizer = pipeline(
-                "summarization", model="sshleifer/distilbart-cnn-12-6"
-            )
-        except Exception as exc:  # pragma: no cover
-            logger.warning("Could not load summarization model: %s", exc)
-            summarizer = None
-    return summarizer
+    When ``DAILYNEWS_SKIP_HF=1`` is set in the environment a tiny stub is
+    returned that avoids loading Hugging Face models. Otherwise the
+    ``sshleifer/distilbart-cnn-12-6`` model is loaded on first use.
+    """
+
+    global _summarizer
+    if _summarizer is not None:
+        return _summarizer
+
+    if os.getenv("DAILYNEWS_SKIP_HF") == "1":
+        def _stub(text: str, **_: object) -> list[dict]:
+            return [{"summary_text": "Model disabled."}]
+
+        _summarizer = _stub
+        return _summarizer
+
+    try:
+        from transformers import pipeline  # type: ignore
+
+        _summarizer = pipeline(
+            "summarization", model="sshleifer/distilbart-cnn-12-6"
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.warning("Could not load summarization model: %s", exc)
+
+        def _fallback(text: str, **_: object) -> list[dict]:
+            return [{"summary_text": text[:200]}]
+
+        _summarizer = _fallback
+    return _summarizer
 
 
 def _prepare_text(articles: Iterable[dict]) -> str:
@@ -46,10 +66,7 @@ def summarize_articles(articles: list[dict], per_topic: bool = False) -> str:
     if not text.strip():
         return "No news available."
 
-    summ = _get_summarizer()
-    if summ is None:
-        logger.warning("Summarizer model is not available; returning truncated text.")
-        return text[:200]
+    summ = get_summarizer()
 
     try:
         result = summ(text, max_length=100, do_sample=False)

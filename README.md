@@ -16,9 +16,15 @@ dailynews --help
 
 # Fetch finance, economy and politics news for the last 8 hours
 dailynews -t "finance,economy,politics" -h 8
+
+# Fetch US English finance news
+# Specify region and language
+dailynews -t finance -r US -l en -h 24
 ```
 
 The first run may download the summarisation model which can take a minute.
+Set ``DAILYNEWS_SKIP_HF=1`` to skip loading the model (useful for tests).
+
 
 ## Troubleshooting
 
@@ -53,6 +59,7 @@ dailynews -e you@example.com
 Run tests with:
 
 ```bash
+export DAILYNEWS_SKIP_HF=1
 pytest -q
 ```
 
