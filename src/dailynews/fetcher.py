@@ -22,30 +22,11 @@ def _normalize(article: dict) -> dict:
         ),
     }
 
-
-def fetch_news(
-    topics: list[str],
-    hours: int,
-    region: str | None = None,
-    language: str | None = None,
-    maxrecords: int = 75,
-) -> list[dict]:
-    """Fetch articles about ``topics`` in the last ``hours`` hours.
-
-    ``region`` and ``language`` may be used to filter results using the GDELT
-    ``sourceCountry`` and ``sourceLang`` fields respectively.
-
     Returns a list of dictionaries with at least ``title``, ``url`` and ``desc``
     keys. In case of network errors or unexpected responses an empty list is
     returned and a warning is logged.
     """
     query = " OR ".join(topics)
-    if region:
-        query += f" sourceCountry:{region}"
-        logger.info("Filtering by region: %s", region)
-    if language:
-        query += f" sourceLang:{language}"
-        logger.info("Filtering by language: %s", language)
     params = {
         "query": query,
         "mode": "artlist",

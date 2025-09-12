@@ -40,25 +40,3 @@ def test_fetch_news_handles_error(monkeypatch):
     monkeypatch.setattr(requests, "get", fake_get)
     articles = fetcher.fetch_news(["test"], 8)
     assert articles == []
-
-
-def test_fetch_news_region_language(monkeypatch):
-    captured = {}
-
-    class DummyResp:
-        status_code = 200
-
-        def raise_for_status(self):
-            pass
-
-        def json(self):  # no articles needed
-            return {"articles": []}
-
-    def fake_get(url, params=None, timeout=10):
-        captured["query"] = params.get("query")
-        return DummyResp()
-
-    monkeypatch.setattr(requests, "get", fake_get)
-    fetcher.fetch_news(["finance"], 8, region="US", language="en")
-    assert "sourceCountry:US" in captured["query"]
-    assert "sourceLang:en" in captured["query"]

@@ -20,21 +20,12 @@ from .summarizer import summarize_articles
 )
 @click.option("--hours", "-h", default=8, type=int, help="Lookback period in hours")
 @click.option("--email", "-e", default=None, help="Email address to send summary to")
-@click.option("--region", "-r", default=None, help="Source country code, e.g. 'US'")
-@click.option(
-    "--language",
-    "-l",
-    default=None,
-    help="Source language code, e.g. 'en'",
-)
 @click.option("--maxrecords", default=75, type=int, show_default=True)
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def main(
     topics: str,
     hours: int,
     email: str | None,
-    region: str | None,
-    language: str | None,
     maxrecords: int,
     verbose: bool,
 ) -> None:
@@ -44,14 +35,6 @@ def main(
 
     topic_list = [t.strip() for t in topics.split(",") if t.strip()]
     logger.info("Fetching news for topics: %s", ", ".join(topic_list))
-
-    articles = fetch_news(
-        topic_list,
-        hours,
-        region=region,
-        language=language,
-        maxrecords=maxrecords,
-    )
     if not articles:
         click.echo(
             "No articles found. Check your internet connection or try different topics."

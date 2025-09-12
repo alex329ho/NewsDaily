@@ -16,9 +16,6 @@ dailynews --help
 
 # Fetch finance, economy and politics news for the last 8 hours
 dailynews -t "finance,economy,politics" -h 8
-
-# Fetch US English finance news
-dailynews -t finance -r US -l en
 ```
 
 The first run may download the summarisation model which can take a minute.
