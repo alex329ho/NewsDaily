@@ -25,6 +25,7 @@ dailynews -t finance -r US -l en -h 24
 The first run may download the summarisation model which can take a minute.
 Set ``DAILYNEWS_SKIP_HF=1`` to skip loading the model (useful for tests).
 
+
 ## Troubleshooting
 
 - `ConnectionError`: check your internet connection.
