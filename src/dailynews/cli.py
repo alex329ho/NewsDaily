@@ -35,6 +35,8 @@ def main(
 
     topic_list = [t.strip() for t in topics.split(",") if t.strip()]
     logger.info("Fetching news for topics: %s", ", ".join(topic_list))
+
+    articles = fetch_news(topic_list, hours, maxrecords=maxrecords)
     if not articles:
         click.echo(
             "No articles found. Check your internet connection or try different topics."
