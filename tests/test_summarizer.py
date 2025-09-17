@@ -16,19 +16,30 @@ def test_summarize_empty_returns_message():
 
 
 def test_summarize_basic_text_contains_keywords(monkeypatch):
+    monkeypatch.setattr(
+        summarizer,
+        "_download_article_text",
+        lambda url: "The global economy is booming thanks to innovation.",
+    )
+
     def fake_sum(text: str, bullet_text: str) -> str:
-        assert "Economy" in text
+        assert "booming" in text
+        assert bullet_text.startswith("- Economy (https://example.com/economy)")
         return "Summary about economy"
 
     monkeypatch.setattr(summarizer, "get_summarizer", lambda: fake_sum)
-    articles = [{"title": "Economy", "desc": "The economy is booming"}]
+    articles = [{"title": "Economy", "url": "https://example.com/economy"}]
     result = summarizer.summarize_articles(articles)
-    assert "economy" in result.lower()
+    assert result.startswith("- Economy (https://example.com/economy)")
+    assert "summary about economy" in result.lower()
 
 
 def test_summarize_by_topic(monkeypatch):
+    monkeypatch.setattr(summarizer, "_download_article_text", lambda _: "")
+
     def fake_sum(text: str, bullet_text: str) -> str:
-        return "summary"
+        assert bullet_text.startswith("-")
+        return f"summary for {bullet_text}"
 
     monkeypatch.setattr(summarizer, "get_summarizer", lambda: fake_sum)
     articles = [
@@ -37,6 +48,8 @@ def test_summarize_by_topic(monkeypatch):
     ]
     result = summarizer.summarize_by_topic(["economy", "politics"], articles)
     assert set(result) == {"economy", "politics"}
+    assert "summary for - Economy today" in result["economy"]
+    assert "summary for - Politics" in result["politics"]
 
 
 def test_stub_used_when_skip_env(monkeypatch):
