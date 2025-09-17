@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+from dataclasses import dataclass
+from html import unescape
 from typing import Callable, Iterable, List
+
+import requests
 
 from .config import get_settings
 
@@ -14,6 +19,22 @@ SummarizerFn = Callable[[str, str], str]
 _summarizer: SummarizerFn | None = None
 _MAX_CHARS = 1000
 _MAX_ARTICLES = 5
+_MAX_REMOTE_CHARS = 8000
+
+
+@dataclass
+class PreparedArticle:
+    """Representation of article data ready for summarisation."""
+
+    title: str
+    link_text: str
+    content: str
+
+    @property
+    def bullet_line(self) -> str:
+        return f"- {self.title}{self.link_text}"
+
+
 def _build_prompt(bullet_text: str) -> str:
     cleaned = bullet_text.strip() or "- (no headlines provided)"
     return (
@@ -80,15 +101,109 @@ def _raise_model_access_error(model_name: str | None, exc: Exception) -> None:
         "HF_API_TOKEN has permission for the repository."
     ) from exc
 
+_SCRIPT_STYLE_RE = re.compile(r"(?is)<(script|style).*?>.*?</\\1>")
+_HTML_TAG_RE = re.compile(r"(?s)<[^>]+>")
 
-def _build_prompt(bullet_text: str) -> str:
-    cleaned = bullet_text.strip() or "- (no headlines provided)"
-    return (
-        "Summarize the following recent news headlines into 2–4 concise sentences "
-        "for a morning briefing:\n"
-        f"{cleaned}\n"
-        "Keep it factual and brief."
-    )
+
+def _strip_html(raw: str) -> str:
+    """Remove script/style blocks and tags from HTML content."""
+
+    if "<" not in raw:
+        return raw
+    cleaned = _SCRIPT_STYLE_RE.sub(" ", raw)
+    cleaned = _HTML_TAG_RE.sub(" ", cleaned)
+    return cleaned
+
+
+def _normalise_text(text: str) -> str:
+    """Normalise whitespace and HTML entities in fetched article text."""
+
+    text = unescape(text)
+    text = text.replace("\x00", " ")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _download_article_text(url: str) -> str:
+    """Fetch article text from ``url`` and strip HTML tags.
+
+    Network failures or non-text responses return an empty string. Only the
+    first ``_MAX_REMOTE_CHARS`` characters are processed to keep responses
+    manageable for summarisation.
+    """
+
+    if not url:
+        return ""
+    headers = {"User-Agent": "DailyNewsBot/1.0"}
+    try:
+        resp = requests.get(url, timeout=5, headers=headers)
+        resp.raise_for_status()
+    except requests.RequestException as exc:  # pragma: no cover - network errors
+        logger.debug("Failed to fetch article content for %s: %s", url, exc)
+        return ""
+
+    content_type = resp.headers.get("Content-Type", "")
+    if "text" not in content_type:
+        return ""
+
+    text = resp.text
+    if len(text) > _MAX_REMOTE_CHARS:
+        text = text[:_MAX_REMOTE_CHARS]
+    text = _strip_html(text)
+    return _normalise_text(text)
+
+
+def _resolve_article_content(article: dict) -> str:
+    """Return textual content for ``article`` using remote fetch as needed."""
+
+    inline_body = str(
+        article.get("content") or article.get("body") or ""
+    ).strip()
+    if inline_body:
+        return _normalise_text(_strip_html(inline_body))
+
+    url = str(article.get("url") or "").strip()
+    remote = _download_article_text(url)
+    if remote:
+        return remote
+
+    fallback = str(
+        article.get("desc") or article.get("description") or ""
+    ).strip()
+    if fallback:
+        return _normalise_text(_strip_html(fallback))
+
+    return ""
+
+
+def _initialise_pipeline(
+    task: str,
+    pipeline_fn: Callable[..., object],
+    *,
+    model: str | None,
+    token: str | None,
+    **kwargs: object,
+) -> object:
+    """Create a transformers pipeline with token compatibility handling."""
+
+    auth_kwargs: dict[str, object] = {}
+    if token:
+        auth_kwargs["token"] = token
+
+    try:
+        pipe = pipeline_fn(task, model=model, **auth_kwargs, **kwargs)
+    except TypeError as exc:
+        if token and "unexpected keyword argument 'token'" in str(exc):
+            pipe = pipeline_fn(task, model=model, use_auth_token=token, **kwargs)
+        else:
+            raise
+
+    model_kwargs = getattr(pipe, "model_kwargs", None)
+    if isinstance(model_kwargs, dict):
+        model_kwargs.pop("use_auth_token", None)
+        model_kwargs.pop("token", None)
+
+    return pipe
 
 
 def get_summarizer() -> SummarizerFn:
@@ -123,10 +238,11 @@ def get_summarizer() -> SummarizerFn:
         ) from exc
 
     try:
-        summarization_pipeline = pipeline(
+        summarization_pipeline = _initialise_pipeline(
             "summarization",
+            pipeline,
             model=settings.hf_model,
-            use_auth_token=settings.hf_api_token,
+            token=settings.hf_api_token,
         )
     except Exception as exc:  # pragma: no cover - requires external model
         if _is_authentication_error(exc):
@@ -152,10 +268,11 @@ def get_summarizer() -> SummarizerFn:
         return _summarizer
 
     try:
-        text_generation = pipeline(
+        text_generation = _initialise_pipeline(
             "text-generation",
+            pipeline,
             model=settings.hf_model,
-            use_auth_token=settings.hf_api_token,
+            token=settings.hf_api_token,
             max_new_tokens=160,
             do_sample=False,
             temperature=0.0,
@@ -180,54 +297,67 @@ def get_summarizer() -> SummarizerFn:
     return _summarizer
 
 
-def _prepare_text(articles: Iterable[dict]) -> tuple[str, str]:
-    text_parts: List[str] = []
-    bullet_lines: List[str] = []
-    total_chars = 0
+def _prepare_articles(articles: Iterable[dict]) -> List[PreparedArticle]:
+    """Return a list of articles capped by ``_MAX_ARTICLES`` with content."""
 
+    prepared: List[PreparedArticle] = []
     for article in list(articles)[:_MAX_ARTICLES]:
-        title = str(article.get("title") or "").strip()
-        desc = str(article.get("desc") or article.get("description") or "").strip()
-        content = " ".join(part for part in [title, desc] if part).strip()
+        content = _resolve_article_content(article)
         if not content:
             continue
-        content = content.replace("\n", " ")
-        remaining = _MAX_CHARS - total_chars
-        if remaining <= 0:
-            break
-        if len(content) > remaining:
-            content = content[:remaining]
-        total_chars += len(content)
-        text_parts.append(content)
-        bullet_label = title or (desc[:60] + ("..." if len(desc) > 60 else ""))
-        bullet_lines.append(f"- {bullet_label.strip()}" if bullet_label else "- (untitled)")
 
-    text = " ".join(text_parts).strip()
-    bullets = "\n".join(bullet_lines).strip()
-    return text, bullets
+        if len(content) > _MAX_CHARS:
+            content = content[:_MAX_CHARS]
+
+        raw_title = str(article.get("title") or "").strip()
+        title = raw_title or "(untitled)"
+
+        url = str(article.get("url") or "").strip()
+        link_target = url or str(article.get("source_domain") or "").strip()
+        link_text = f" ({link_target})" if link_target else ""
+
+        prepared.append(
+            PreparedArticle(
+                title=title,
+                link_text=link_text,
+                content=content,
+            )
+        )
+
+    return prepared
 
 
 def summarize_articles(articles: list[dict], per_topic: bool = False) -> str:
     """Summarize a list of articles."""
+
     if not articles:
         return "No news available."
 
-    text, bullets = _prepare_text(articles)
-    if not text and not bullets:
+    prepared_articles = _prepare_articles(articles)
+    if not prepared_articles:
         return "No news available."
 
     summarizer = get_summarizer()
+    summaries: List[str] = []
 
-    try:
-        summary = summarizer(text, bullets)
-    except TypeError:  # pragma: no cover - compatibility with test stubs
-        summary = summarizer(text)  # type: ignore[misc]
-    except Exception as exc:  # pragma: no cover - network/other errors
-        logger.warning("Summarization failed: %s", exc)
-        summary = text[:200]
+    for item in prepared_articles:
+        try:
+            summary = summarizer(item.content, item.bullet_line)
+        except TypeError:  # pragma: no cover - compatibility with test stubs
+            summary = summarizer(item.content)  # type: ignore[misc]
+        except Exception as exc:  # pragma: no cover - network/other errors
+            logger.warning("Summarization failed for %s: %s", item.title, exc)
+            summary = item.content[:200]
 
-    summary = (summary or "").strip()
-    return summary or "No news available."
+        summary = (summary or "").strip()
+        if not summary:
+            continue
+        summaries.append(f"{item.bullet_line}\n  {summary}")
+
+    if not summaries:
+        return "No news available."
+
+    return "\n".join(summaries)
 
 
 def summarize_by_topic(topics: list[str], articles: list[dict]) -> dict[str, str]:
