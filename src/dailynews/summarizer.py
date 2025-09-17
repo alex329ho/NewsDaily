@@ -176,6 +176,36 @@ def _resolve_article_content(article: dict) -> str:
     return ""
 
 
+def _initialise_pipeline(
+    task: str,
+    pipeline_fn: Callable[..., object],
+    *,
+    model: str | None,
+    token: str | None,
+    **kwargs: object,
+) -> object:
+    """Create a transformers pipeline with token compatibility handling."""
+
+    auth_kwargs: dict[str, object] = {}
+    if token:
+        auth_kwargs["token"] = token
+
+    try:
+        pipe = pipeline_fn(task, model=model, **auth_kwargs, **kwargs)
+    except TypeError as exc:
+        if token and "unexpected keyword argument 'token'" in str(exc):
+            pipe = pipeline_fn(task, model=model, use_auth_token=token, **kwargs)
+        else:
+            raise
+
+    model_kwargs = getattr(pipe, "model_kwargs", None)
+    if isinstance(model_kwargs, dict):
+        model_kwargs.pop("use_auth_token", None)
+        model_kwargs.pop("token", None)
+
+    return pipe
+
+
 def get_summarizer() -> SummarizerFn:
     """Return a cached summarizer callable."""
 
@@ -208,10 +238,11 @@ def get_summarizer() -> SummarizerFn:
         ) from exc
 
     try:
-        summarization_pipeline = pipeline(
+        summarization_pipeline = _initialise_pipeline(
             "summarization",
+            pipeline,
             model=settings.hf_model,
-            use_auth_token=settings.hf_api_token,
+            token=settings.hf_api_token,
         )
     except Exception as exc:  # pragma: no cover - requires external model
         if _is_authentication_error(exc):
@@ -237,10 +268,11 @@ def get_summarizer() -> SummarizerFn:
         return _summarizer
 
     try:
-        text_generation = pipeline(
+        text_generation = _initialise_pipeline(
             "text-generation",
+            pipeline,
             model=settings.hf_model,
-            use_auth_token=settings.hf_api_token,
+            token=settings.hf_api_token,
             max_new_tokens=160,
             do_sample=False,
             temperature=0.0,
