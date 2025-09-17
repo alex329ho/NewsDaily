@@ -14,6 +14,71 @@ SummarizerFn = Callable[[str, str], str]
 _summarizer: SummarizerFn | None = None
 _MAX_CHARS = 1000
 _MAX_ARTICLES = 5
+def _build_prompt(bullet_text: str) -> str:
+    cleaned = bullet_text.strip() or "- (no headlines provided)"
+    return (
+        "Summarize the following recent news headlines into 2–4 concise sentences "
+        "for a morning briefing:\n"
+        f"{cleaned}\n"
+        "Keep it factual and brief."
+    )
+
+def _model_access_url(model_name: str | None) -> str:
+    if not model_name:
+        return "https://huggingface.co/"
+    sanitized = model_name.strip("/")
+    return f"https://huggingface.co/{sanitized}?library=transformers"
+
+
+def _ensure_transformer_backend_available(model_name: str | None) -> None:
+    try:
+        from transformers.utils import (  # type: ignore
+            is_flax_available,
+            is_tf_available,
+            is_torch_available,
+        )
+    except ImportError as exc:  # pragma: no cover - requires transformers package
+        raise RuntimeError(
+            "The 'transformers' package is required for summarization. Install it "
+            "with `pip install transformers` or set DAILYNEWS_SKIP_HF=1 for offline "
+            "runs."
+        ) from exc
+
+    if not any([is_torch_available(), is_tf_available(), is_flax_available()]):
+        model_label = model_name or "the configured model"
+        raise RuntimeError(
+            "Cannot load Hugging Face model "
+            f"'{model_label}' because no deep learning backend is available. "
+            "Install PyTorch, TensorFlow >= 2.0, or Flax (for example: `pip install "
+            "torch`) before running DailyNews summarization, or set "
+            "DAILYNEWS_SKIP_HF=1 for offline development."
+        )
+
+
+def _is_authentication_error(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status in {401, 403}:
+        return True
+    message = str(exc).lower()
+    indicators = [
+        "401",
+        "403",
+        "gated repo",
+        "access to model",
+        "please log in",
+    ]
+    return any(indicator in message for indicator in indicators)
+
+
+def _raise_model_access_error(model_name: str | None, exc: Exception) -> None:
+    link = _model_access_url(model_name)
+    model_label = model_name or "the configured model"
+    raise RuntimeError(
+        "Access to the Hugging Face model "
+        f"'{model_label}' is restricted. Request access at {link} and ensure "
+        "HF_API_TOKEN has permission for the repository."
+    ) from exc
 
 
 def _build_prompt(bullet_text: str) -> str:
@@ -47,15 +112,31 @@ def get_summarizer() -> SummarizerFn:
             "summarization can run."
         )
 
+    _ensure_transformer_backend_available(settings.hf_model)
+
     try:
         from transformers import pipeline  # type: ignore
+    except ImportError as exc:  # pragma: no cover - requires transformers package
+        raise RuntimeError(
+            "The 'transformers' package is required for summarization. Install it "
+            "with `pip install transformers`."
+        ) from exc
 
+    try:
         summarization_pipeline = pipeline(
             "summarization",
             model=settings.hf_model,
             use_auth_token=settings.hf_api_token,
         )
-
+    except Exception as exc:  # pragma: no cover - requires external model
+        if _is_authentication_error(exc):
+            _raise_model_access_error(settings.hf_model, exc)
+        logger.warning(
+            "Could not initialise summarization pipeline, falling back to text "
+            "generation: %s",
+            exc,
+        )
+    else:
         def _summarize(text: str, bullet_text: str) -> str:
             normalized = (text or bullet_text).replace("\n", " ").strip()
             result = summarization_pipeline(
@@ -69,38 +150,34 @@ def get_summarizer() -> SummarizerFn:
 
         _summarizer = _summarize
         return _summarizer
-    except Exception as exc:  # pragma: no cover - requires external model
-        logger.warning(
-            "Could not initialise summarization pipeline, falling back to text "
-            "generation: %s",
-            exc,
+
+    try:
+        text_generation = pipeline(
+            "text-generation",
+            model=settings.hf_model,
+            use_auth_token=settings.hf_api_token,
+            max_new_tokens=160,
+            do_sample=False,
+            temperature=0.0,
         )
-        try:
-            from transformers import pipeline  # type: ignore
+    except Exception as inner:  # pragma: no cover - requires external model
+        if _is_authentication_error(inner):
+            _raise_model_access_error(settings.hf_model, inner)
+        raise RuntimeError(
+            "Unable to load Hugging Face model for summarization. Install a "
+            "supported backend or set DAILYNEWS_SKIP_HF=1 for offline runs."
+        ) from inner
 
-            text_generation = pipeline(
-                "text-generation",
-                model=settings.hf_model,
-                use_auth_token=settings.hf_api_token,
-                max_new_tokens=160,
-                do_sample=False,
-                temperature=0.0,
-            )
+    def _generate(_: str, bullet_text: str) -> str:
+        prompt = _build_prompt(bullet_text)
+        outputs = text_generation(prompt)
+        generated = outputs[0].get("generated_text", "") if outputs else ""
+        if generated.startswith(prompt):
+            generated = generated[len(prompt) :]
+        return generated.strip()
 
-            def _generate(_: str, bullet_text: str) -> str:
-                prompt = _build_prompt(bullet_text)
-                outputs = text_generation(prompt)
-                generated = outputs[0].get("generated_text", "") if outputs else ""
-                if generated.startswith(prompt):
-                    generated = generated[len(prompt) :]
-                return generated.strip()
-
-            _summarizer = _generate
-            return _summarizer
-        except Exception as inner:  # pragma: no cover - requires external model
-            raise RuntimeError(
-                "Unable to load Hugging Face model for summarization"
-            ) from inner
+    _summarizer = _generate
+    return _summarizer
 
 
 def _prepare_text(articles: Iterable[dict]) -> tuple[str, str]:

@@ -31,13 +31,21 @@ Create a `.env` file (or export the variables in your shell) using
 
 ```bash
 export HF_API_TOKEN="<your HF token>"
-export HF_MODEL="facebook/MobileLLM-R1-950M"
+export HF_MODEL="HuggingFaceTB/SmolLM2-1.7B-Instruct"
 export API_PORT=8000
 # Optional: change if your backend runs elsewhere
 export DAILYNEWS_API_URL="http://localhost:8000"
 ```
 
 Never commit tokens to the repository—see [SECURITY.md](SECURITY.md).
+
+> **Note:** `HuggingFaceTB/SmolLM2-1.7B-Instruct` is an instruction-tuned text
+> generation model. DailyNews applies a summarisation prompt using the
+> Transformers text-generation pipeline. Ensure your `HF_API_TOKEN` grants
+> access to the model at
+> <https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct?library=transformers>,
+> and install a deep-learning backend (e.g. `pip install torch`) or enable
+> `DAILYNEWS_SKIP_HF=1` for offline tests.
 
 ### Run the backend API
 
@@ -143,6 +151,12 @@ and offline-friendly behaviour.
   and reachable.
 - `HF_MODEL and HF_API_TOKEN must be set` – the CLI/backend attempted to load a
   model without credentials.
+- `Access to the Hugging Face model ... is restricted` – confirm your token can
+  reach the configured model at
+  <https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct?library=transformers>.
+- `Cannot load Hugging Face model ... because no deep learning backend is available`
+  – install PyTorch/TensorFlow/Flax so Transformers can execute, or enable
+  `DAILYNEWS_SKIP_HF=1` for offline use.
 - Mobile devices cannot reach the backend – confirm the correct base URL for
   your simulator/emulator and that the host firewall allows local connections.
 - Summaries look stale – reduce the `--hours` window or adjust topics.

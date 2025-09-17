@@ -6,6 +6,7 @@ class RequestException(Exception):
 
 class exceptions:
     ConnectionError = type("ConnectionError", (RequestException,), {})
+    HTTPError = type("HTTPError", (RequestException,), {})
 
 
 def get(*args, **kwargs):  # pragma: no cover - should be patched in tests
