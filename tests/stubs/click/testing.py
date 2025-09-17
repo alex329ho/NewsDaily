@@ -21,12 +21,20 @@ def _parse_args(args):
         "--maxrecords": "maxrecords",
         "-v": "verbose",
         "--verbose": "verbose",
+        "--use-api": "use_api",
+        "--no-use-api": "use_api",
     }
     i = 0
     while i < len(args):
         arg = args[i]
         if arg in ("-v", "--verbose"):
             kwargs[mapping[arg]] = True
+            i += 1
+        elif arg == "--use-api":
+            kwargs[mapping[arg]] = True
+            i += 1
+        elif arg == "--no-use-api":
+            kwargs[mapping[arg]] = False
             i += 1
         else:
             key = mapping.get(arg)
@@ -43,6 +51,7 @@ def _parse_args(args):
         "language": None,
         "maxrecords": 75,
         "verbose": False,
+        "use_api": False,
     }
     for k, v in defaults.items():
         kwargs.setdefault(k, v)

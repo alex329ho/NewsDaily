@@ -2,3 +2,5 @@ click>=8
 requests>=2.31
 transformers>=4.40
 python-dotenv>=1.0
+fastapi>=0.110
+uvicorn[standard]>=0.23

@@ -1,60 +1,85 @@
 from click.testing import CliRunner
 
-from dailynews import cli, summarizer
+from dailynews import cli
 
 
-def test_cli_basic(monkeypatch):
+def test_cli_local_flow(monkeypatch):
+    runner = CliRunner()
+    called = {}
+
+    def fake_service(topics, hours, region=None, language=None, maxrecords=75):
+        called["topics"] = topics
+        called["region"] = region
+        called["language"] = language
+        return {
+            "topics": topics,
+            "hours": hours,
+            "region": region,
+            "language": language,
+            "fetched_count": 2,
+            "summary": "Summary",
+            "headlines": [
+                {"title": "Title1", "url": "http://example.com/1", "source_domain": "example.com", "seendate": ""},
+                {"title": "Title2", "url": "http://example.com/2", "source_domain": "example.com", "seendate": ""},
+            ],
+        }
+
+    monkeypatch.setattr(cli, "summarize_run", fake_service)
+
+    result = runner.invoke(cli.main, ["-t", "finance", "-r", "US", "-l", "en"])
+    assert result.exit_code == 0
+    assert called["topics"] == ["finance"]
+    assert called["region"] == "US"
+    assert called["language"] == "en"
+    assert "Summary" in result.output
+
+
+def test_cli_use_api(monkeypatch):
     runner = CliRunner()
 
-    def fake_fetch(topics, hours, region=None, language=None, maxrecords=75):
-        return [
-            {"title": "Title1", "url": "http://example.com/1", "desc": "Desc"},
-            {"title": "Title2", "url": "http://example.com/2", "desc": "Desc"},
-        ]
+    class DummyResp:
+        def raise_for_status(self):
+            pass
 
-    monkeypatch.setattr(cli, "fetch_news", fake_fetch)
-    monkeypatch.setattr(
-        summarizer, "get_summarizer", lambda: lambda text, **kw: [{"summary_text": "Summary"}]
-    )
+        def json(self):
+            return {
+                "topics": ["finance"],
+                "hours": 4,
+                "region": None,
+                "language": None,
+                "fetched_count": 1,
+                "summary": "API Summary",
+                "headlines": [
+                    {"title": "Title", "url": "http://example.com", "source_domain": "example.com", "seendate": ""}
+                ],
+            }
 
-    result = runner.invoke(cli.main, ["-t", "finance", "-h", "8"])
+    def fake_get(url, params=None, timeout=20):
+        assert "/summary" in url
+        return DummyResp()
+
+    monkeypatch.setattr(cli.requests, "get", fake_get)
+
+    result = runner.invoke(cli.main, ["--use-api", "-t", "finance", "-h", "4"])
     assert result.exit_code == 0
-    assert (
-        "DailyNews summary for finance (last 8h, region=All, lang=All):"
-        in result.output
-    )
-    assert "Summary" in result.output
+    assert "API Summary" in result.output
 
 
 def test_cli_handles_no_articles(monkeypatch):
     runner = CliRunner()
 
-    monkeypatch.setattr(
-        cli,
-        "fetch_news",
-        lambda topics, hours, region=None, language=None, maxrecords=75: [],
-    )
+    def fake_service(topics, hours, region=None, language=None, maxrecords=75):
+        return {
+            "topics": topics,
+            "hours": hours,
+            "region": region,
+            "language": language,
+            "fetched_count": 0,
+            "summary": "No news available.",
+            "headlines": [],
+        }
+
+    monkeypatch.setattr(cli, "summarize_run", fake_service)
     result = runner.invoke(cli.main, [])
     assert result.exit_code == 0
     assert "No articles found" in result.output
-
-
-def test_cli_passes_region_language(monkeypatch):
-    runner = CliRunner()
-    called = {}
-
-    def fake_fetch(topics, hours, region=None, language=None, maxrecords=75):
-        called["topics"] = topics
-        called["region"] = region
-        called["language"] = language
-        return []
-
-    monkeypatch.setattr(cli, "fetch_news", fake_fetch)
-    monkeypatch.setattr(summarizer, "get_summarizer", lambda: lambda text, **kw: [])
-    result = runner.invoke(
-        cli.main, ["-t", "finance", "-r", "US", "-l", "en"]
-    )
-    assert result.exit_code == 0
-    assert called["topics"] == ["finance"]
-    assert called["region"] == "US"
-    assert called["language"] == "en"
