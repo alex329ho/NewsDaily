@@ -14,7 +14,14 @@ SummarizerFn = Callable[[str, str], str]
 _summarizer: SummarizerFn | None = None
 _MAX_CHARS = 1000
 _MAX_ARTICLES = 5
-
+def _build_prompt(bullet_text: str) -> str:
+    cleaned = bullet_text.strip() or "- (no headlines provided)"
+    return (
+        "Summarize the following recent news headlines into 2–4 concise sentences "
+        "for a morning briefing:\n"
+        f"{cleaned}\n"
+        "Keep it factual and brief."
+    )
 
 def _model_access_url(model_name: str | None) -> str:
     if not model_name:
