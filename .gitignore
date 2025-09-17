@@ -6,3 +6,7 @@ build/
 *.egg-info/
 .DS_Store
 .env
+mobile/flutter_app/.dart_tool/
+mobile/flutter_app/build/
+mobile/react_native_app/node_modules/
+mobile/react_native_app/.expo/

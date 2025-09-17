@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dailynews"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fetch, summarize, and optionally email daily news headlines."
 authors = [{name = "DailyNews Authors", email = "author@example.com"}]
 license = {text = "MIT"}
@@ -14,7 +14,12 @@ dependencies = [
     "requests>=2.31",
     "transformers>=4.40",
     "python-dotenv>=1.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.23",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
 
 [project.scripts]
 dailynews = "dailynews.cli:main"

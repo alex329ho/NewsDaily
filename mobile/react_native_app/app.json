@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "DailyNews",
+    "slug": "dailynews-rn",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "sdkVersion": "50.0.0",
+    "platforms": ["ios", "android", "web"],
+    "assetBundlePatterns": ["**/*"]
+  }
+}
