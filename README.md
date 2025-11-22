@@ -3,7 +3,6 @@
 DailyNews fetches recent headlines from the [GDELT](https://www.gdeltproject.org/) API,
 summarises them with the OpenRouter `x-ai/grok-4.1-fast` model, exposes a FastAPI
 backend for mobile clients, and optionally emails the summary to you.
-
 > **Requires Python 3.10+** for structural pattern matching and typing features used
 > across the CLI, API service, and tests.
 
