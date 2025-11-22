@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Any, Dict, List
 
 import click
@@ -79,6 +80,12 @@ def main(
     use_api: bool,
 ) -> None:
     """Entry point for the dailynews command."""
+    if sys.version_info < (3, 10):
+        version = ".".join(map(str, sys.version_info[:3]))
+        raise click.ClickException(
+            f"Python 3.10+ is required to run DailyNews (found {version})."
+        )
+
     configure_logging(verbose)
     logger = logging.getLogger("dailynews.cli")
 

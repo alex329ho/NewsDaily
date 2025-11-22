@@ -83,3 +83,15 @@ def test_cli_handles_no_articles(monkeypatch):
     result = runner.invoke(cli.main, [])
     assert result.exit_code == 0
     assert "No articles found" in result.output
+
+
+def test_cli_rejects_old_python(monkeypatch):
+    runner = CliRunner()
+
+    class DummySys:
+        version_info = (3, 9, 0)
+
+    monkeypatch.setattr(cli, "sys", DummySys())
+    result = runner.invoke(cli.main, [])
+    assert result.exit_code != 0
+    assert "Python 3.10+ is required" in result.output

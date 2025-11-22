@@ -10,22 +10,27 @@ from typing import Optional
 class Settings:
     """Simple settings loaded from environment variables."""
 
-    hf_api_token: Optional[str]
-    hf_model: Optional[str]
+    openrouter_api_key: Optional[str]
+    openrouter_model: str
+    openrouter_api_url: str
     api_port: int
     api_base_url: str
 
     @property
-    def has_hf_credentials(self) -> bool:
-        return bool(self.hf_api_token and self.hf_model)
+    def has_openrouter_credentials(self) -> bool:
+        return bool(self.openrouter_api_key)
 
 
 _settings_cache: Optional[Settings] = None
 
 
 def _load_settings() -> Settings:
-    token = os.getenv("HF_API_TOKEN")
-    model = os.getenv("HF_MODEL")
+    token = os.getenv("OPENROUTER_API_KEY")
+    model = os.getenv("OPENROUTER_MODEL") or "x-ai/grok-4.1-fast"
+    api_url = (
+        os.getenv("OPENROUTER_API_URL")
+        or "https://openrouter.ai/x-ai/grok-4.1-fast/api"
+    )
     base_url = (os.getenv("DAILYNEWS_API_URL") or "http://localhost:8000").rstrip("/")
     port_raw = os.getenv("API_PORT", "8000")
     try:
@@ -34,8 +39,9 @@ def _load_settings() -> Settings:
         raise ValueError("API_PORT must be an integer") from None
 
     return Settings(
-        hf_api_token=token,
-        hf_model=model,
+        openrouter_api_key=token,
+        openrouter_model=model,
+        openrouter_api_url=api_url,
         api_port=port,
         api_base_url=base_url,
     )
