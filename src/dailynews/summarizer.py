@@ -1,4 +1,4 @@
-"""Utilities for summarising news articles using HuggingFace transformers."""
+"""Utilities for summarising news articles using the OpenRouter API."""
 from __future__ import annotations
 
 import logging
@@ -20,6 +20,11 @@ _summarizer: SummarizerFn | None = None
 _MAX_CHARS = 1000
 _MAX_ARTICLES = 5
 _MAX_REMOTE_CHARS = 8000
+_SYSTEM_INSTRUCTION = (
+    "You are a news briefing assistant. Given recent headlines and snippets, "
+    "produce a factual, concise summary in 2–4 sentences. Avoid embellishment "
+    "and keep the tone neutral."
+)
 
 
 @dataclass
@@ -44,37 +49,6 @@ def _build_prompt(bullet_text: str) -> str:
         "Keep it factual and brief."
     )
 
-def _model_access_url(model_name: str | None) -> str:
-    if not model_name:
-        return "https://huggingface.co/"
-    sanitized = model_name.strip("/")
-    return f"https://huggingface.co/{sanitized}?library=transformers"
-
-
-def _ensure_transformer_backend_available(model_name: str | None) -> None:
-    try:
-        from transformers.utils import (  # type: ignore
-            is_flax_available,
-            is_tf_available,
-            is_torch_available,
-        )
-    except ImportError as exc:  # pragma: no cover - requires transformers package
-        raise RuntimeError(
-            "The 'transformers' package is required for summarization. Install it "
-            "with `pip install transformers` or set DAILYNEWS_SKIP_HF=1 for offline "
-            "runs."
-        ) from exc
-
-    if not any([is_torch_available(), is_tf_available(), is_flax_available()]):
-        model_label = model_name or "the configured model"
-        raise RuntimeError(
-            "Cannot load Hugging Face model "
-            f"'{model_label}' because no deep learning backend is available. "
-            "Install PyTorch, TensorFlow >= 2.0, or Flax (for example: `pip install "
-            "torch`) before running DailyNews summarization, or set "
-            "DAILYNEWS_SKIP_HF=1 for offline development."
-        )
-
 
 def _is_authentication_error(exc: Exception) -> bool:
     response = getattr(exc, "response", None)
@@ -82,23 +56,15 @@ def _is_authentication_error(exc: Exception) -> bool:
     if status in {401, 403}:
         return True
     message = str(exc).lower()
-    indicators = [
-        "401",
-        "403",
-        "gated repo",
-        "access to model",
-        "please log in",
-    ]
+    indicators = ["401", "403", "unauthorized", "forbidden"]
     return any(indicator in message for indicator in indicators)
 
 
-def _raise_model_access_error(model_name: str | None, exc: Exception) -> None:
-    link = _model_access_url(model_name)
-    model_label = model_name or "the configured model"
+def _raise_model_access_error(api_url: str, model_name: str, exc: Exception) -> None:
     raise RuntimeError(
-        "Access to the Hugging Face model "
-        f"'{model_label}' is restricted. Request access at {link} and ensure "
-        "HF_API_TOKEN has permission for the repository."
+        "Access to the OpenRouter model is restricted. Confirm the "
+        "OPENROUTER_API_KEY is valid and that your account can call "
+        f"'{model_name}' via {api_url}."
     ) from exc
 
 _SCRIPT_STYLE_RE = re.compile(r"(?is)<(script|style).*?>.*?</\\1>")
@@ -176,34 +142,41 @@ def _resolve_article_content(article: dict) -> str:
     return ""
 
 
-def _initialise_pipeline(
-    task: str,
-    pipeline_fn: Callable[..., object],
-    *,
-    model: str | None,
-    token: str | None,
-    **kwargs: object,
-) -> object:
-    """Create a transformers pipeline with token compatibility handling."""
-
-    auth_kwargs: dict[str, object] = {}
-    if token:
-        auth_kwargs["token"] = token
+def _call_openrouter(prompt: str, *, api_url: str, api_key: str, model: str) -> str:
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_INSTRUCTION},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 240,
+    }
 
     try:
-        pipe = pipeline_fn(task, model=model, **auth_kwargs, **kwargs)
-    except TypeError as exc:
-        if token and "unexpected keyword argument 'token'" in str(exc):
-            pipe = pipeline_fn(task, model=model, use_auth_token=token, **kwargs)
-        else:
-            raise
+        response = requests.post(api_url, json=payload, headers=headers, timeout=20)
+        response.raise_for_status()
+    except requests.HTTPError as exc:  # pragma: no cover - requires network
+        if _is_authentication_error(exc):
+            _raise_model_access_error(api_url, model, exc)
+        raise
 
-    model_kwargs = getattr(pipe, "model_kwargs", None)
-    if isinstance(model_kwargs, dict):
-        model_kwargs.pop("use_auth_token", None)
-        model_kwargs.pop("token", None)
+    except requests.RequestException as exc:  # pragma: no cover - requires network
+        raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
 
-    return pipe
+    data = response.json()
+    choices = data.get("choices") or []
+    if choices:
+        message = choices[0].get("message", {})
+        content = message.get("content", "")
+        if content:
+            return str(content).strip()
+
+    return ""
 
 
 def get_summarizer() -> SummarizerFn:
@@ -213,87 +186,30 @@ def get_summarizer() -> SummarizerFn:
     if _summarizer is not None:
         return _summarizer
 
-    if os.getenv("DAILYNEWS_SKIP_HF") == "1":
+    if os.getenv("DAILYNEWS_SKIP_HF") == "1" or os.getenv("DAILYNEWS_SKIP_SUMMARY") == "1":
         def _stub(_: str, __: str) -> str:
-            return "Summarization skipped (DAILYNEWS_SKIP_HF=1)."
+            return "Summarization skipped (DAILYNEWS_SKIP_SUMMARY=1)."
 
         _summarizer = _stub
         return _summarizer
 
     settings = get_settings()
-    if not settings.has_hf_credentials:
+    if not settings.has_openrouter_credentials:
         raise RuntimeError(
-            "HF_MODEL and HF_API_TOKEN must be set in the environment before "
-            "summarization can run."
+            "OPENROUTER_API_KEY must be set in the environment before summarization "
+            "can run."
         )
 
-    _ensure_transformer_backend_available(settings.hf_model)
-
-    try:
-        from transformers import pipeline  # type: ignore
-    except ImportError as exc:  # pragma: no cover - requires transformers package
-        raise RuntimeError(
-            "The 'transformers' package is required for summarization. Install it "
-            "with `pip install transformers`."
-        ) from exc
-
-    try:
-        summarization_pipeline = _initialise_pipeline(
-            "summarization",
-            pipeline,
-            model=settings.hf_model,
-            token=settings.hf_api_token,
-        )
-    except Exception as exc:  # pragma: no cover - requires external model
-        if _is_authentication_error(exc):
-            _raise_model_access_error(settings.hf_model, exc)
-        logger.warning(
-            "Could not initialise summarization pipeline, falling back to text "
-            "generation: %s",
-            exc,
-        )
-    else:
-        def _summarize(text: str, bullet_text: str) -> str:
-            normalized = (text or bullet_text).replace("\n", " ").strip()
-            result = summarization_pipeline(
-                normalized,
-                max_length=160,
-                min_length=20,
-                do_sample=False,
-            )
-            summary = result[0].get("summary_text", "") if result else ""
-            return str(summary).strip()
-
-        _summarizer = _summarize
-        return _summarizer
-
-    try:
-        text_generation = _initialise_pipeline(
-            "text-generation",
-            pipeline,
-            model=settings.hf_model,
-            token=settings.hf_api_token,
-            max_new_tokens=160,
-            do_sample=False,
-            temperature=0.0,
-        )
-    except Exception as inner:  # pragma: no cover - requires external model
-        if _is_authentication_error(inner):
-            _raise_model_access_error(settings.hf_model, inner)
-        raise RuntimeError(
-            "Unable to load Hugging Face model for summarization. Install a "
-            "supported backend or set DAILYNEWS_SKIP_HF=1 for offline runs."
-        ) from inner
-
-    def _generate(_: str, bullet_text: str) -> str:
+    def _summarize(_: str, bullet_text: str) -> str:
         prompt = _build_prompt(bullet_text)
-        outputs = text_generation(prompt)
-        generated = outputs[0].get("generated_text", "") if outputs else ""
-        if generated.startswith(prompt):
-            generated = generated[len(prompt) :]
-        return generated.strip()
+        return _call_openrouter(
+            prompt,
+            api_url=settings.openrouter_api_url,
+            api_key=settings.openrouter_api_key or "",
+            model=settings.openrouter_model,
+        )
 
-    _summarizer = _generate
+    _summarizer = _summarize
     return _summarizer
 
 

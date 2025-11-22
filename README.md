@@ -1,16 +1,16 @@
 # DailyNews
 
 DailyNews fetches recent headlines from the [GDELT](https://www.gdeltproject.org/) API,
-summarises them with a Hugging Face model, exposes a FastAPI backend for mobile
-clients, and optionally emails the summary to you.
+summarises them with the OpenRouter `x-ai/grok-4.1-fast` model, exposes a FastAPI
+backend for mobile clients, and optionally emails the summary to you.
 
 ## Features
 
 - Click-based CLI with optional backend integration (`--use-api`).
 - FastAPI service exposing `/health` and `/summary` endpoints with CORS enabled
   for local development tooling and mobile simulators.
-- Configurable Hugging Face model via `HF_MODEL` and `HF_API_TOKEN` environment
-  variables with an offline testing stub (`DAILYNEWS_SKIP_HF=1`).
+- Configurable OpenRouter model via `OPENROUTER_MODEL` and `OPENROUTER_API_KEY`
+  environment variables with an offline testing stub (`DAILYNEWS_SKIP_SUMMARY=1`).
 - Mobile clients:
   - Flutter application with topic chips, configurable filters, and tappable
     headlines.
@@ -30,8 +30,9 @@ Create a `.env` file (or export the variables in your shell) using
 [`examples/.env.example`](examples/.env.example) as a template. At minimum set:
 
 ```bash
-export HF_API_TOKEN="<your HF token>"
-export HF_MODEL="HuggingFaceTB/SmolLM2-1.7B-Instruct"
+export OPENROUTER_API_KEY="<your OpenRouter token>"
+export OPENROUTER_MODEL="x-ai/grok-4.1-fast"
+export OPENROUTER_API_URL="https://openrouter.ai/x-ai/grok-4.1-fast/api"
 export API_PORT=8000
 # Optional: change if your backend runs elsewhere
 export DAILYNEWS_API_URL="http://localhost:8000"
@@ -39,13 +40,9 @@ export DAILYNEWS_API_URL="http://localhost:8000"
 
 Never commit tokens to the repository—see [SECURITY.md](SECURITY.md).
 
-> **Note:** `HuggingFaceTB/SmolLM2-1.7B-Instruct` is an instruction-tuned text
-> generation model. DailyNews applies a summarisation prompt using the
-> Transformers text-generation pipeline. Ensure your `HF_API_TOKEN` grants
-> access to the model at
-> <https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct?library=transformers>,
-> and install a deep-learning backend (e.g. `pip install torch`) or enable
-> `DAILYNEWS_SKIP_HF=1` for offline tests.
+> **Note:** DailyNews uses the OpenRouter chat-completions interface to call
+> `x-ai/grok-4.1-fast` with a summarisation instruction. Set
+> `DAILYNEWS_SKIP_SUMMARY=1` to bypass remote calls during offline testing.
 
 ### Run the backend API
 
@@ -74,10 +71,10 @@ dailynews --use-api -t finance -h 4
 dailynews -t finance -r US -l en -h 24
 ```
 
-When running tests or developing offline, disable the Hugging Face model:
+When running tests or developing offline, disable the OpenRouter calls:
 
 ```bash
-export DAILYNEWS_SKIP_HF=1
+export DAILYNEWS_SKIP_SUMMARY=1
 pytest -q
 ```
 
@@ -138,7 +135,7 @@ for troubleshooting tips and network configuration guidance.
 ## Testing
 
 ```bash
-export DAILYNEWS_SKIP_HF=1
+export DAILYNEWS_SKIP_SUMMARY=1
 pytest -q
 ```
 
@@ -149,14 +146,10 @@ and offline-friendly behaviour.
 
 - `Backend API returned invalid JSON` – ensure the FastAPI server is running
   and reachable.
-- `HF_MODEL and HF_API_TOKEN must be set` – the CLI/backend attempted to load a
-  model without credentials.
-- `Access to the Hugging Face model ... is restricted` – confirm your token can
-  reach the configured model at
-  <https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct?library=transformers>.
-- `Cannot load Hugging Face model ... because no deep learning backend is available`
-  – install PyTorch/TensorFlow/Flax so Transformers can execute, or enable
-  `DAILYNEWS_SKIP_HF=1` for offline use.
+- `OPENROUTER_API_KEY must be set` – the CLI/backend attempted to call the
+  OpenRouter API without credentials.
+- `Access to the OpenRouter model ... is restricted` – confirm your token can
+  reach `https://openrouter.ai/x-ai/grok-4.1-fast/api`.
 - Mobile devices cannot reach the backend – confirm the correct base URL for
   your simulator/emulator and that the host firewall allows local connections.
 - Summaries look stale – reduce the `--hours` window or adjust topics.
@@ -168,6 +161,6 @@ virtual environment before calling the CLI.
 
 ## Security
 
-Environment variables contain all sensitive material (Hugging Face tokens,
+Environment variables contain all sensitive material (OpenRouter tokens,
 SMTP credentials). Rotate tokens immediately if exposed and review
 [SECURITY.md](SECURITY.md) for recommended practices.
