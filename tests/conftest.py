@@ -12,7 +12,7 @@ from dailynews import config as config_module, summarizer
 
 @pytest.fixture(autouse=True)
 def _test_env(monkeypatch):
-    monkeypatch.setenv("DAILYNEWS_SKIP_HF", "1")
+    monkeypatch.setenv("DAILYNEWS_SKIP_SUMMARY", "1")
     config_module.reset_settings()
     summarizer._summarizer = None
     yield
