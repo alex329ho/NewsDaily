@@ -4,6 +4,8 @@ from __future__ import annotations
 import io
 from contextlib import redirect_stdout
 
+from . import ClickException
+
 
 def _parse_args(args):
     kwargs = {}
@@ -71,6 +73,9 @@ class CliRunner:
         try:
             with redirect_stdout(buf):
                 func(**kwargs)
+        except ClickException as exc:
+            exit_code = 1
+            print(exc.format_message(), file=buf)
         except SystemExit as e:
             exit_code = e.code or 0
         return type("Result", (), {"exit_code": exit_code, "output": buf.getvalue()})
